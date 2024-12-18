@@ -1,0 +1,9 @@
+# Ignorar archivos binarios de Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Ignorar directorios de dependencias
+/vendor/
