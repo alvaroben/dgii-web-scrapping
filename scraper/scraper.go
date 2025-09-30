@@ -1,85 +1,61 @@
 package scraper
 
 import (
-	"bytes"
-	"fmt"
 	"log"
-	"mime/multipart"
-	"net/http"
+	"strings"
 
 	"github.com/gocolly/colly"
 )
 
 func GetCompanyDataByRNC(fiscalIdentity string) (string, error) {
-	// Create a collector to set initial values
+	url := "https://www.dgii.gov.do/app/WebApps/ConsultasWeb2/ConsultasWeb/consultas/rnc.aspx"
+	var companyName string
+	var viewState, eventValidation string
+
 	c := colly.NewCollector(
-		colly.AllowedDomains("www.dgii.gov.do"),
+		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
+			"AppleWebKit/537.36 (KHTML, like Gecko) "+
+			"Chrome/120.0.0.0 Safari/537.36"),
+		colly.AllowURLRevisit(),
+		colly.MaxDepth(1),
 	)
 
-	var viewState, eventValidation, companyName string
-
-	// Get __VIEWSTATE value
-	c.OnHTML("input[name='__VIEWSTATE']", func(e *colly.HTMLElement) {
+	c.OnHTML("input[name=__VIEWSTATE]", func(e *colly.HTMLElement) {
 		viewState = e.Attr("value")
-		fmt.Println("__VIEWSTATE finded:", viewState)
 	})
-
-	// Get __EVENTVALIDATION value
-	c.OnHTML("input[name='__EVENTVALIDATION']", func(e *colly.HTMLElement) {
+	c.OnHTML("input[name=__EVENTVALIDATION]", func(e *colly.HTMLElement) {
 		eventValidation = e.Attr("value")
-		fmt.Println("__EVENTVALIDATION finded:", eventValidation)
 	})
 
-	// Evento después de obtener los valores dinámicos
 	c.OnScraped(func(r *colly.Response) {
-		fmt.Println("Sending form with values...")
-
-		body := new(bytes.Buffer)
-		writer := multipart.NewWriter(body)
-
-		// Add fields to form
-		writer.WriteField("__VIEWSTATE", viewState)
-		writer.WriteField("__EVENTVALIDATION", eventValidation)
-		writer.WriteField("ctl00$cphMain$txtRNCCedula", fiscalIdentity)
-		writer.WriteField("ctl00$cphMain$btnBuscarPorRNC", "Buscar")
-
-		err := writer.Close()
-		if err != nil {
-			return
-		}
-
-		// Create a new collector to send form
 		postCollector := colly.NewCollector(
-			colly.AllowedDomains("www.dgii.gov.do"),
+			colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+				"AppleWebKit/537.36 (KHTML, like Gecko) " +
+				"Chrome/120.0.0.0 Safari/537.36"),
 		)
 
-		postCollector.OnHTML("#ctl00_cphMain_dvDatosContribuyentes", func(e *colly.HTMLElement) {
-			goquerySelection := e.DOM
-			companyName = goquerySelection.Find("tr").Eq(1).Find("td").Eq(1).Text()
+		postCollector.OnHTML("#cphMain_dvDatosContribuyentes", func(e *colly.HTMLElement) {
+			rows := e.DOM.Find("tr")
+			if rows.Length() > 1 {
+				companyName = strings.TrimSpace(rows.Eq(1).Find("td").Eq(1).Text())
+			}
 		})
 
-		// Set HTTP header on multipart/form-data
-		headers := http.Header{}
-		headers.Set("Content-Type", writer.FormDataContentType())
-
-		// Send form with POST
-		err = postCollector.Request(
-			"POST",
-			"https://www.dgii.gov.do/app/WebApps/ConsultasWeb/consultas/rnc.aspx",
-			body,
-			nil,
-			headers,
-		)
+		err := postCollector.Post(url, map[string]string{
+			"__VIEWSTATE":                   viewState,
+			"__EVENTVALIDATION":             eventValidation,
+			"ctl00$cphMain$txtRNCCedula":    fiscalIdentity,
+			"ctl00$cphMain$btnBuscarPorRNC": "Buscar",
+		})
 		if err != nil {
-			log.Fatal("Error trying to send form", err)
+			log.Println("Error en POST:", err)
 		}
 	})
 
-	// Visit page to get initial values
-	err := c.Visit("https://www.dgii.gov.do/app/WebApps/ConsultasWeb/consultas/rnc.aspx")
+	err := c.Visit(url)
 	if err != nil {
 		return "", err
 	}
 
-	return companyName, err
+	return companyName, nil
 }
